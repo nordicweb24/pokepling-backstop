@@ -1,0 +1,61 @@
+# Reads the shops every five minutes so nothing depends on one desktop being on.
+#
+# The run asks the poller first whether the fast reader is already feeding, and
+# exits in a couple of seconds when it is. So on a good day this costs almost
+# nothing, and on a bad day — a crash, a reboot, a night with the machine off —
+# it is the thing keeping the data alive.
+name: backstop
+
+on:
+  schedule:
+    # Five minutes is the floor GitHub allows, and scheduled runs can be late
+    # when the platform is busy. That is fine for a floor; it is not a
+    # replacement for the 60-second reader.
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Feed even if the fast reader looks alive"
+        type: boolean
+        default: false
+
+concurrency:
+  # Two runners feeding the same shops at once is waste, not redundancy.
+  group: backstop
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  feed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Read and feed
+        env:
+          INGEST_TOKEN: ${{ secrets.INGEST_TOKEN }}
+        run: node backstop.mjs ${{ inputs.force && '--force' || '' }}
+
+      # GitHub switches off scheduled workflows in a repository that has had no
+      # commits for 60 days, and its own runs do not count as activity. Without
+      # this the backstop would quietly stop about two months from now — on some
+      # ordinary Tuesday, with nobody watching. A weekly line in a file is
+      # cheaper than finding that out the hard way.
+      - name: Weekly heartbeat, so GitHub does not switch us off
+        if: github.event_name == 'schedule'
+        run: |
+          stamp="$(date -u +%Y-%W)"
+          if [ "$(cat .heartbeat 2>/dev/null)" != "$stamp" ]; then
+            echo "$stamp" > .heartbeat
+            git config user.name  "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add .heartbeat
+            git commit -m "heartbeat $stamp [skip ci]"
+            git push
+          fi
