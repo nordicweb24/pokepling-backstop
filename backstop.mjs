@@ -18,6 +18,8 @@
 // nothing else — not the Supabase service-role key the PC agent uses, and not
 // the Cloudflare API token. A runner we do not own gets the narrowest key that
 // does the job.
+import { createHash } from "node:crypto";
+
 const POLLER = "https://collect-poller.nordicwebco.workers.dev";
 const UA = "PokePlingBot/1.0 (+https://pokepling.com/bot; restock alerts)";
 const TOKEN = process.env.INGEST_TOKEN;
@@ -31,6 +33,27 @@ if (!TOKEN) {
   console.error("INGEST_TOKEN is not set — refusing to run rather than failing shop by shop");
   process.exit(1);
 }
+
+// A secret travels from a file, through a human, into a web form, and one
+// character of it arrived as an em dash instead of a hyphen. Node then refused
+// to put it in a header and the run died with a stack trace about ByteStrings,
+// which says nothing about what was actually wrong.
+//
+// So the token is checked before it is used, and the two facts needed to
+// diagnose it are printed. The fingerprint is a hash prefix: it proves which
+// token this is without being the token, which matters because these logs are
+// public.
+const bad = [...TOKEN].filter((c) => c.charCodeAt(0) > 126);
+if (bad.length) {
+  console.error(
+    `INGEST_TOKEN contains ${bad.length} non-ASCII character(s) — ` +
+    `almost always autocorrect turning a hyphen into an en or em dash on the way through a paste. ` +
+    `Re-copy it without editing.`,
+  );
+  process.exit(1);
+}
+const fingerprint = createHash("sha256").update(TOKEN).digest("hex").slice(0, 8);
+console.log(`token fingerprint ${fingerprint}, ${TOKEN.length} chars`);
 
 const auth = { authorization: `Bearer ${TOKEN}` };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
