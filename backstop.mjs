@@ -25,9 +25,14 @@ const UA = "PokePlingBot/1.0 (+https://pokepling.com/bot; restock alerts)";
 const TOKEN = process.env.INGEST_TOKEN;
 const FORCE = process.argv.includes("--force");
 
-// If the freshest Shopify shop was read more recently than this, the PC agent
-// is alive and this run has nothing to add.
-const AGENT_ALIVE_MINUTES = 6;
+// If the freshest shop was read more recently than this, the fast reader is
+// alive and this run has nothing to add.
+//
+// Three minutes, deliberately BELOW the worker's four-minute trigger. When the
+// worker sends a runner it also sends --force, so this check is only reached on
+// GitHub's own schedule — but a gap between the two thresholds is what made the
+// first live test dispatch a runner that then decided it was not needed.
+const AGENT_ALIVE_MINUTES = 3;
 
 if (!TOKEN) {
   console.error("INGEST_TOKEN is not set — refusing to run rather than failing shop by shop");
