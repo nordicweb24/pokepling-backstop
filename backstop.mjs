@@ -120,7 +120,7 @@ async function readByProduct(shop) {
   return out;
 }
 
-let fed = 0, failed = 0, changes = 0;
+let fed = 0, failed = 0, changes = 0, n = 0;
 for (const shop of shops) {
   try {
     const products = shop.mode === "product" ? await readByProduct(shop) : await readShop(shop);
@@ -139,10 +139,14 @@ for (const shop of shops) {
     if (!res.ok) throw new Error(`ingest ${res.status}: ${JSON.stringify(j).slice(0, 120)}`);
     changes += j.changes ?? 0;
     fed++;
-    console.log(`${shop.slug.padEnd(17)} ${String(products.length).padStart(5)} products → ${j.matched ?? "?"} matched, ${j.changes ?? 0} changed`);
+    // Deliberately anonymous. These logs are public on a public repository, and
+    // which shops PokePling tracks is not ours to publish. The service knows
+    // exactly who is who; /health says which one is unhappy. Here a shop is a
+    // number, and that is enough to tell a good run from a bad one.
+    console.log(`shop ${String(++n).padStart(2)}  ${String(products.length).padStart(5)} read → ${j.matched ?? "?"} matched, ${j.changes ?? 0} changed`);
   } catch (err) {
     failed++;
-    console.error(`${shop.slug.padEnd(17)} FAILED: ${err.message}`);
+    console.error(`shop ${String(++n).padStart(2)}  FAILED: ${err.message.replace(/https?:\/\/\S+/g, "<url>")}`);
   }
   await sleep(1000);
 }

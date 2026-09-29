@@ -8,9 +8,9 @@ name: backstop
 
 on:
   schedule:
-    # Five minutes is the floor GitHub allows, and scheduled runs can be late
-    # when the platform is busy. That is fine for a floor; it is not a
-    # replacement for the 60-second reader.
+    # Five minutes is the fastest GitHub allows, and busy periods can delay a
+    # scheduled run past it. That is fine for a floor. It is not a replacement
+    # for the 60-second reader, which stays the fast path when it is up.
     - cron: "*/5 * * * *"
   workflow_dispatch:
     inputs:
