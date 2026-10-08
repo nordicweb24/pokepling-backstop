@@ -34,6 +34,31 @@ const FORCE = process.argv.includes("--force");
 // first live test dispatch a runner that then decided it was not needed.
 const AGENT_ALIVE_MINUTES = 3;
 
+// How stale the data has to be before a change we find counts as old news.
+//
+// This number is the whole difference between a backstop that works and one
+// that quietly throws every restock away. `quiet: true` used to be hardcoded on
+// every post, and the endpoint honours it by applying the flip to the database
+// and alerting nobody — so for the twenty months of hours a day that the PC is
+// off, PokePling detected every restock and told no one. On 7 October the 30th
+// Celebration Booster Bundle came back at 12:17 UTC and stayed in stock for
+// twenty hours; thirty-five people were watching it and not one was told,
+// because the agent had been down since 00:47 and this runner swallowed it.
+//
+// The reasoning behind `quiet` was sound and was applied one place too widely.
+// After a real blackout the first upload diffs fresh stock against hours-old
+// rows, so half the catalogue looks like it just restocked and paging people
+// about drops they already missed is worse than silence. But on the ordinary
+// five-minute cadence the rows are five minutes old, so a flip found here
+// happened minutes ago — that is news, and it is the only news this service
+// exists to deliver.
+//
+// Thirty minutes, to match MIN_OUT_MINUTES in the engine: a return to stock is
+// only announced at all if the thing was gone half an hour, so an announcement
+// that is itself under half an hour old is still worth making. Beyond that the
+// change may be hours old and the quiet catch-up is the right behaviour.
+const CATCHUP_MINUTES = 30;
+
 if (!TOKEN) {
   console.error("INGEST_TOKEN is not set — refusing to run rather than failing shop by shop");
   process.exit(1);
@@ -79,7 +104,17 @@ if (!FORCE && Number.isFinite(freshest) && freshest <= AGENT_ALIVE_MINUTES) {
   console.log(`the agent is feeding (freshest shop read ${freshest} min ago) — nothing to do`);
   process.exit(0);
 }
-console.log(`freshest Shopify read is ${freshest} min old — stepping in\n`);
+// Old news or live news? Decided once, from the staleness we already measured,
+// and NOT assumed. A run that cannot tell how stale the data is treats it as a
+// catch-up: guessing "live" there is how a blackout becomes a flood of alerts
+// about drops that are already over.
+const catchUp = !Number.isFinite(freshest) || freshest > CATCHUP_MINUTES;
+console.log(
+  `freshest Shopify read is ${freshest} min old — stepping in` +
+    (catchUp
+      ? ` (quiet catch-up: over ${CATCHUP_MINUTES} min stale, changes may be old news)\n`
+      : ` (alerting normally: data is fresh enough that a change found now just happened)\n`),
+);
 
 // ── read, exactly as the PC agent reads ────────────────────────────────────
 // Same fields, same rules: availability is per variant, price is the cheapest
@@ -152,16 +187,17 @@ let fed = 0, failed = 0, changes = 0, n = 0;
 for (const shop of shops) {
   try {
     const products = shop.mode === "product" ? await readByProduct(shop) : await readShop(shop);
-    // quiet: apply the data, alert nobody.
-    //
-    // This run only happens because the engine was blind for a while, so every
-    // "change" it sees is a change that already happened — possibly hours ago.
-    // Paging people about a restock they have already missed is worse than
-    // saying nothing, and it is exactly what the agent's first round suppresses.
+    // quiet is `catchUp`, decided above from how stale the data actually is —
+    // never a constant. The sentence that used to be here said this run "only
+    // happens because the engine was blind for a while, so every change it sees
+    // already happened". That is true of the first run after a blackout and
+    // false of every run after it: once this runner IS the reader, on a
+    // five-minute cadence, the changes it finds are minutes old and are the
+    // only restocks anyone is going to hear about.
     const res = await fetch(`${POLLER}/ingest/shopify`, {
       method: "POST",
       headers: { ...auth, "content-type": "application/json", "user-agent": UA },
-      body: JSON.stringify({ slug: shop.slug, products, quiet: true, gone: products.gone ?? [] }),
+      body: JSON.stringify({ slug: shop.slug, products, quiet: catchUp, gone: products.gone ?? [] }),
     });
     const j = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(`ingest ${res.status}: ${JSON.stringify(j).slice(0, 120)}`);
